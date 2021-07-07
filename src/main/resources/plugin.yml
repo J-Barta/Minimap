@@ -1,0 +1,10 @@
+name: Minimap
+main: me.Jedi.minimap.Minimap
+version: 0.1-SNAPSHOT
+api-version: 1.17
+depend: [DungeonsXL]
+commands:
+  minimap:
+    description: The base command of them minimap plugin
+    aliases: [mm]
+    permission-message: You don't have the permission required to perform this command. You need /<permission>

@@ -3,17 +3,23 @@ package me.Jedi.minimap.command;
 import co.aikar.commands.BaseCommand;
 import co.aikar.commands.annotation.*;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
+import io.papermc.lib.PaperLib;
 import me.Jedi.minimap.util.minecraft.PlayerInfo;
+import me.Jedi.minimap.util.minecraft.WorldScaler;
 import org.bukkit.*;
+import org.bukkit.block.Block;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.text.MessageFormat;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 import static me.Jedi.minimap.Minimap.*;
+import static me.Jedi.minimap.util.minecraft.WorldScaler.*;
+import static org.bukkit.Material.*;
 
 @CommandAlias("minimap|map|m")
 @Description("Minimap base command")
@@ -21,6 +27,9 @@ public class CommandMap extends BaseCommand {
     //TODO: Implement permissions :D
     //TODO: Make it so that players being stupid with their config won't throw errors
     List<PlayerInfo> playerInfos = new ArrayList<>();
+
+    Map<Location, Material> blocksToPlace = new HashMap<>();
+
 
     @Default
     public void base(CommandSender sender, String[] args) {
@@ -56,7 +65,7 @@ public class CommandMap extends BaseCommand {
                         return;
                     }
                 }
-                Material block = Material.matchMaterial(args[0]);
+                Material block = matchMaterial(args[0]);
 
                 player.sendBlockChange(player.getTargetBlock(null, 5).getLocation(),
                         block.createBlockData());
@@ -143,40 +152,135 @@ public class CommandMap extends BaseCommand {
     }
 
     @Subcommand("createcopy|createscalecopy")
+    @CommandCompletion("@new_world @x1 @x2 @x2 @z2 @scale @y_level @worlds @nothing")
     public void createScaleCopy(CommandSender sender, String[] args) {
-        //args: worldname x1 z1 x2 z2 scale y-level
-        if(args.length >= 7) {
+        //args: worldname x1 z1 x2 z2 scale y-level originalname
+        if(args.length >= 8) {
             //Create a scaled version of the world
-            String name = args[0];
+            String newName = args[0];
             int x1 = Integer.parseInt(args[1]);
             int z1 = Integer.parseInt(args[2]);
             int x2 = Integer.parseInt(args[3]);
             int z2 = Integer.parseInt(args[4]);
+
+            x1 = x1 > 0 ? (x1+15)/16 * 16 : (x1-15)/16*16;
+            z1 = z1 > 0 ? (z1+15)/16 * 16 : (z1-15)/16*16;
+            x2 = x2 > 0 ? (x2+15)/16 * 16 : (x2-15)/16*16;
+            z2 = z2 > 0 ? (z2+15)/16 * 16 : (z2-15)/16*16;
+
             double scale = Double.parseDouble(args[5]);
             int yLevel = Integer.parseInt(args[6]);
+            World fromWorld = Bukkit.getWorld(args[7]);
 
-            if(!isWorld(name)) {
+            if(!isWorld(newName)) {
+                Player p = (Player) sender;
+
+                int finalX1 = x1;
+                int finalX2 = x2;
+                int finalZ1 = z1;
+                int finalZ2 = z2;
+
+                sender.sendMessage("Creating your world");
+                worldManager.addWorld(newName, World.Environment.NORMAL, null, WorldType.FLAT, false, null);
+
+                worldManager.getMVWorld(newName).setGameMode(GameMode.ADVENTURE);
+                worldManager.getMVWorld(newName).setAllowFlight(true);
+                worldManager.getMVWorld(newName).setHunger(false);
+                worldManager.getMVWorld(newName).setBedRespawn(false);
+                worldManager.getMVWorld(newName).setAutoLoad(true);
+                worldManager.getMVWorld(newName).setAllowAnimalSpawn(false);
+                worldManager.getMVWorld(newName).setAllowMonsterSpawn(false);
+                worldManager.getMVWorld(newName).setSpawnLocation(new Location(Bukkit.getWorld(newName), (x1+x2)/2, yLevel+1, (z1+z2)/2));
+
+                sender.sendMessage("World created! Beginning the scaling process (this might take a while)");
+                p.teleport(new Location(Bukkit.getWorld(newName), finalX1 /16, yLevel+5, finalX2 /16));
+
+                blocksToPlace.clear();
+
+                BukkitRunnable placeLoop = new BukkitRunnable() {
+
+                    @Override
+                    public void run() {
+                        for(Map.Entry<Location, Material> entry : blocksToPlace.entrySet()) {
+                            entry.getKey().getWorld().getBlockAt(entry.getKey()).setType(entry.getValue());
+                        }
+                    }
+                };
+
                 new BukkitRunnable() {
                     @Override
                     public void run() {
-                        sender.sendMessage("Creating your world");
-                        worldManager.addWorld(name, World.Environment.NORMAL, null, WorldType.FLAT, false, null);
-
-                        MultiverseWorld world = worldManager.getMVWorld(name);
-                        world.setGameMode(GameMode.ADVENTURE);
-                        world.setAllowFlight(true);
-                        world.setHunger(false);
-                        world.setBedRespawn(false);
-                        world.setAutoLoad(true);
-                        world.setAllowAnimalSpawn(false);
-                        world.setAllowMonsterSpawn(false);
-
-                        sender.sendMessage("World created! Beginning the scaling process (this might take a while)");
 
                         //Go through each chunk systematically and save each chosen block in multidimensional List (is that even a thing)
-                        
+                        double xDirection = finalX1 > finalX2 ? -16 : 16;
+                        double zDirection = finalZ1 > finalZ2 ? -16 : 16;
 
-                    }}.runTaskAsynchronously(pl);
+                        int currentX = finalX1;
+                        int currentZ = finalZ1;
+
+                        boolean doneZ = false;
+                        boolean doneX = false;
+
+                        World newWorld = Bukkit.getWorld(newName);
+
+                        Chunk mapChunk;
+                        Chunk prevMapChunk = new Location(newWorld, finalX2, 0, finalZ2).getChunk();
+
+                        while(!doneZ) {
+                            while(!doneX) {
+                                Chunk currentChunk = new Location(fromWorld, currentX, 0, currentZ).getChunk();
+                                //PaperLib.getChunkAtAsync(new Location(fromWorld, currentX, 0, currentZ), true);
+                                Material block = getChunkMode(currentChunk, fromWorld, sender);
+
+                                mapChunk = new Location(newWorld, currentX/16, 0, currentZ/16).getChunk();
+                                if(mapChunk != prevMapChunk) {
+                                    PaperLib.getChunkAtAsync(new Location(newWorld, currentX/16, 0, currentZ/16));
+                                }
+
+                                prevMapChunk = mapChunk;
+
+                                if(FALLING_BLOCKS.contains(block)) {
+                                    sender.sendMessage(block.name().toLowerCase(Locale.ROOT) + " is a falling block! Placing stone under it");
+                                    blocksToPlace.put(new Location(newWorld, currentX/16, yLevel, currentZ/16), STONE);
+                                }
+
+                                blocksToPlace.put(new Location(newWorld, currentX/16, yLevel, currentZ/16), block);
+
+                                currentX += xDirection;
+
+                                if(xDirection > 0 && currentX >= finalX2) {
+                                    doneX = true;
+                                } else if(xDirection < 0 && currentX <= finalX2){
+                                    doneX = true;
+                                }
+                            }
+
+                            doneX = false;
+                            currentX = finalX1;
+                            currentZ += zDirection;
+
+                            if(zDirection > 0 && currentZ >= finalZ2) {
+                                doneZ = true;
+                            } else if(zDirection < 0 && currentZ <= finalZ2){
+                                doneZ = true;
+                            }
+
+                        }
+
+                        sender.sendMessage("World generation complete!");
+
+                        this.cancel();
+                    }
+
+                    @Override
+                    public void cancel() {
+                        sender.sendMessage("Placing in blocks now!");
+                        placeLoop.runTask(pl);
+                        super.cancel();
+                    }
+                }.runTaskLaterAsynchronously(pl, 200L);
+
+
             }else {
                 sender.sendMessage("You've entered the name of a world that already exists");
             }
@@ -305,6 +409,15 @@ public class CommandMap extends BaseCommand {
 
         //TODO: Finish what was bein done here
         return false;
+    }
+
+    @Subcommand("chunkinfo")
+    public void ChunkInfo(CommandSender sender) {
+        if(sender instanceof Player) {
+            getChunkMode(((Player) sender).getLocation().getChunk(), ((Player) sender).getWorld(), sender);
+        } else {
+            sender.sendMessage("You must be a player to perform this action!");
+        }
     }
 
 }

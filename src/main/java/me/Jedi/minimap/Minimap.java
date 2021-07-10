@@ -4,7 +4,9 @@ import co.aikar.commands.PaperCommandManager;
 import com.google.common.collect.ImmutableList;
 import com.onarandombox.MultiverseCore.MultiverseCore;
 import com.onarandombox.MultiverseCore.api.MVWorldManager;
+import io.papermc.lib.PaperLib;
 import me.Jedi.minimap.command.CommandMap;
+import me.Jedi.minimap.listener.RandomListener;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import org.bukkit.Bukkit;
@@ -33,24 +35,15 @@ public class Minimap extends JavaPlugin {
         config = this.getConfig();
         lp = LuckPermsProvider.get();
 
-        setupConfig();
-
         setupACF();
 
         pl = Minimap.getPlugin(Minimap.class);
 
         this.saveDefaultConfig();
+
+        //getServer().getPluginManager().registerEvents(new RandomListener(), this);
     }
 
-    void setupConfig() {
-        /*
-        config.addDefault("mapworld", "NONE");
-        config.addDefault("locations", new String[1]);
-        config.options().copyDefaults(true);
-        this.saveDefaultConfig();
-
-         */
-    }
 
     void setupACF() {
         manager.registerCommand(new CommandMap());
@@ -70,6 +63,34 @@ public class Minimap extends JavaPlugin {
 
         manager.getCommandCompletions().registerCompletion("locations", c -> {
             return ImmutableList.copyOf(getConfig().getConfigurationSection("locations").getKeys(false));
+        });
+
+        manager.getCommandCompletions().registerCompletion("new_wold", c -> {
+            return ImmutableList.of("<new-world>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("x1", c -> {
+            return ImmutableList.of("<x1>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("z1", c -> {
+            return ImmutableList.of("<z1>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("x2", c -> {
+            return ImmutableList.of("<x2>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("z2", c -> {
+            return ImmutableList.of("<z2>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("scale", c -> {
+            return ImmutableList.of("<scale>");
+        });
+
+        manager.getCommandCompletions().registerCompletion("y_level", c -> {
+            return ImmutableList.of("<y-level>");
         });
 
     }

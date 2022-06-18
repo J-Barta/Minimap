@@ -2,7 +2,7 @@ name: Minimap
 main: me.Jedi.minimap.Minimap
 version: 0.1-SNAPSHOT
 api-version: 1.17
-depend: ['Multiverse-Core', 'LuckPerms']
+depend: ['Multiverse-Core', 'LuckPerms', 'Citizens']
 commands:
   minimap:
     description: The base command of them minimap plugin

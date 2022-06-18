@@ -7,6 +7,7 @@ import com.onarandombox.MultiverseCore.api.MVWorldManager;
 import io.papermc.lib.PaperLib;
 import me.Jedi.minimap.command.CommandMap;
 import me.Jedi.minimap.listener.RandomListener;
+import me.Jedi.minimap.util.minecraft.TeleportListener;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import org.bukkit.Bukkit;
@@ -41,7 +42,7 @@ public class Minimap extends JavaPlugin {
 
         this.saveDefaultConfig();
 
-        //getServer().getPluginManager().registerEvents(new RandomListener(), this);
+        getServer().getPluginManager().registerEvents(new TeleportListener(), this);
     }
 
 

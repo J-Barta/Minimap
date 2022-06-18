@@ -4,18 +4,24 @@ import co.aikar.commands.BaseCommand;
 import co.aikar.commands.annotation.*;
 import com.onarandombox.MultiverseCore.api.MultiverseWorld;
 import io.papermc.lib.PaperLib;
+import me.Jedi.minimap.util.minecraft.BlockPlaceRunnable;
 import me.Jedi.minimap.util.minecraft.PlayerInfo;
+import me.Jedi.minimap.util.minecraft.EntranceAnimationRunnable;
 import me.Jedi.minimap.util.minecraft.WorldScaler;
+import net.citizensnpcs.api.CitizensAPI;
+import net.citizensnpcs.api.npc.NPC;
+import net.citizensnpcs.trait.SkinTrait;
 import org.bukkit.*;
-import org.bukkit.block.Block;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
+import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.text.MessageFormat;
+import java.time.Duration;
+import java.time.LocalTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 
 import static me.Jedi.minimap.Minimap.*;
 import static me.Jedi.minimap.util.minecraft.WorldScaler.*;
@@ -28,15 +34,94 @@ public class CommandMap extends BaseCommand {
     //TODO: Make it so that players being stupid with their config won't throw errors
     List<PlayerInfo> playerInfos = new ArrayList<>();
 
-    Map<Location, Material> blocksToPlace = new HashMap<>();
-
 
     @Default
     public void base(CommandSender sender, String[] args) {
         //This actually loads the map
         if(args.length == 0) {
             if (sender instanceof Player) {
+                Player p = (Player) sender;
                 //Send the player to the map world
+                if(p.getWorld() == Bukkit.getWorld(pl.getConfig().getString("mapworld"))) {
+                    //Teleport player directly scaled out of the map world
+                    Location scaledLocation = p.getLocation();
+                    scaledLocation.setWorld(Bukkit.getWorld(pl.getConfig().getString("leaveworld")));
+                    scaledLocation.setX(scaledLocation.getX()*16);
+                    scaledLocation.setZ(scaledLocation.getZ()*16);
+
+                    p.teleport(new Location(scaledLocation.getWorld(), scaledLocation.getX(), WorldScaler.getTopBlock(scaledLocation) + 1, scaledLocation.getZ()));
+
+
+                } else {
+                    //Teleport player into the map world
+
+                    NPC npc = CitizensAPI.getNPCRegistry().createNPC(EntityType.PLAYER, p.getName());
+                    npc.setName(p.getName());
+                    npc.addTrait(SkinTrait.class);
+                    npc.getTraitNullable(SkinTrait.class).setSkinName("Jedi_4");
+
+                    Location originalLocation = new Location(p.getLocation().getWorld(), p.getLocation().getX(), p.getLocation().getY(), p.getLocation().getZ());
+                    npc.spawn(originalLocation);
+
+
+                    Location viewingLocation = p.getLocation();
+                    viewingLocation.setX(viewingLocation.getX() + 3);
+                    viewingLocation.setY(viewingLocation.getY() + 3);
+                    viewingLocation.setZ(viewingLocation.getZ() + 3);
+                    viewingLocation.setYaw(135);
+                    viewingLocation.setPitch(45);
+
+                    p.teleport(viewingLocation);
+                    p.setGameMode(GameMode.SPECTATOR);
+                    p.setMetadata("entering-map", new FixedMetadataValue(pl, "entering-map"));
+
+                    BukkitRunnable teleportPlayer = new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            WorldScaler.TeleportPlayerIntoMap((Player) sender, pl);
+                        }
+                    };
+
+                    Player player = p;
+                    final Location[] location = {null};
+
+                    BukkitRunnable spawnLightning = new BukkitRunnable() {
+                        @Override
+                        public void run() {
+                            player.getWorld().strikeLightningEffect(location[0]);
+
+                            npc.despawn();
+                            CitizensAPI.getNPCRegistry().deregister(npc);
+                        }
+                    };
+
+                    Location finalOriginalLocation = originalLocation;
+                    new BukkitRunnable() {
+
+                        @Override
+                        public void run() {
+                            new EntranceAnimationRunnable(p, finalOriginalLocation, 3, 200, Particle.FLAME, 50, 5, 50, 45).runTask(pl);
+                            try {
+                                Thread.sleep(1000);
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                            }
+
+
+                            location[0] = finalOriginalLocation;
+                            spawnLightning.runTask(pl);
+                            try {
+                                Thread.sleep(1000);
+                            } catch (InterruptedException e) {
+                            }
+
+                            p.removeMetadata("entering-map", pl);
+
+                            teleportPlayer.runTask(pl);
+                        }
+                    }.runTaskAsynchronously(pl);
+
+                }
             } else {
                 sender.sendMessage("You must be a player to execute this command");
             }
@@ -156,6 +241,8 @@ public class CommandMap extends BaseCommand {
     public void createScaleCopy(CommandSender sender, String[] args) {
         //args: worldname x1 z1 x2 z2 scale y-level originalname
         if(args.length >= 8) {
+
+            LocalTime startTime = LocalTime.now();
             //Create a scaled version of the world
             String newName = args[0];
             int x1 = Integer.parseInt(args[1]);
@@ -192,24 +279,30 @@ public class CommandMap extends BaseCommand {
                 worldManager.getMVWorld(newName).setAllowMonsterSpawn(false);
                 worldManager.getMVWorld(newName).setSpawnLocation(new Location(Bukkit.getWorld(newName), (x1+x2)/2, yLevel+1, (z1+z2)/2));
 
+                Bukkit.getWorld(newName).setGameRule(GameRule.DO_DAYLIGHT_CYCLE, false);
+                Bukkit.getWorld(newName).setGameRule(GameRule.DO_MOB_LOOT, false);
+                Bukkit.getWorld(newName).setGameRule(GameRule.DO_MOB_SPAWNING, false);
+                Bukkit.getWorld(newName).setGameRule(GameRule.DO_WEATHER_CYCLE, false);
+
+                pl.getConfig().options().copyDefaults(true);
+
+                pl.getConfig().set("mapworld", args[0]);
+                pl.getConfig().set("bounding-box.pos1.x", x1);
+                pl.getConfig().set("bounding-box.pos1.z", z1);
+                pl.getConfig().set("bounding-box.pos2.x", x2);
+                pl.getConfig().set("bounding-box.pos2.z", z2);
+                pl.getConfig().set("map-y", yLevel);
+                pl.getConfig().set("leaveworld", fromWorld.getName());
+                pl.saveConfig();
+
                 sender.sendMessage("World created! Beginning the scaling process (this might take a while)");
-                p.teleport(new Location(Bukkit.getWorld(newName), finalX1 /16, yLevel+5, finalX2 /16));
-
-                blocksToPlace.clear();
-
-                BukkitRunnable placeLoop = new BukkitRunnable() {
-
-                    @Override
-                    public void run() {
-                        for(Map.Entry<Location, Material> entry : blocksToPlace.entrySet()) {
-                            entry.getKey().getWorld().getBlockAt(entry.getKey()).setType(entry.getValue());
-                        }
-                    }
-                };
+                p.teleport(new Location(Bukkit.getWorld(newName), finalX1 /16, yLevel+5, finalZ1 /16));
+                Bukkit.getWorld(newName).getBlockAt(new Location(Bukkit.getWorld(newName), finalX1 /16, yLevel, finalZ1 /16)).setType(DIAMOND_BLOCK);
 
                 new BukkitRunnable() {
                     @Override
                     public void run() {
+                        BlockPlaceRunnable placeBlock;
 
                         //Go through each chunk systematically and save each chosen block in multidimensional List (is that even a thing)
                         double xDirection = finalX1 > finalX2 ? -16 : 16;
@@ -228,8 +321,9 @@ public class CommandMap extends BaseCommand {
 
                         while(!doneZ) {
                             while(!doneX) {
+                                LocalTime startTime =  LocalTime.now();
+
                                 Chunk currentChunk = new Location(fromWorld, currentX, 0, currentZ).getChunk();
-                                //PaperLib.getChunkAtAsync(new Location(fromWorld, currentX, 0, currentZ), true);
                                 Material block = getChunkMode(currentChunk, fromWorld, sender);
 
                                 mapChunk = new Location(newWorld, currentX/16, 0, currentZ/16).getChunk();
@@ -241,10 +335,21 @@ public class CommandMap extends BaseCommand {
 
                                 if(FALLING_BLOCKS.contains(block)) {
                                     sender.sendMessage(block.name().toLowerCase(Locale.ROOT) + " is a falling block! Placing stone under it");
-                                    blocksToPlace.put(new Location(newWorld, currentX/16, yLevel, currentZ/16), STONE);
+
+                                    placeBlock = new BlockPlaceRunnable(pl, new Location(newWorld, currentX/16, yLevel-1, currentZ/16), STONE);
+                                    placeBlock.runTask(pl);
+
                                 }
 
-                                blocksToPlace.put(new Location(newWorld, currentX/16, yLevel, currentZ/16), block);
+                                placeBlock = new BlockPlaceRunnable(pl, new Location(newWorld, currentX/16, yLevel, currentZ/16), block);
+                                placeBlock.runTask(pl);
+
+                                newWorld.getBlockAt(new Location(newWorld, currentX/16, yLevel, currentZ/16)).setBiome(fromWorld.getBlockAt(new Location(fromWorld, currentX, yLevel, currentZ)).getBiome());
+
+                                LocalTime endTime = LocalTime.now();
+
+                                Duration duration = Duration.between(startTime, endTime);
+                                pl.getLogger().info("This chunk took " + duration.toMillis() + " to complete. Current rate is " + 1.0 / (duration.toMillis()/1000.0) + " chunks per second.");
 
                                 currentX += xDirection;
 
@@ -264,20 +369,15 @@ public class CommandMap extends BaseCommand {
                             } else if(zDirection < 0 && currentZ <= finalZ2){
                                 doneZ = true;
                             }
-
                         }
 
-                        sender.sendMessage("World generation complete!");
+                        sender.sendMessage("World generation complete! Block breakdown sent on the server console");
 
-                        this.cancel();
+                        for(Map.Entry<Material, Integer> entry : totalDetectedBlocks.entrySet()) {
+                            pl.getLogger().info(entry.getKey() + ": " + entry.getValue());
+                        }
                     }
 
-                    @Override
-                    public void cancel() {
-                        sender.sendMessage("Placing in blocks now!");
-                        placeLoop.runTask(pl);
-                        super.cancel();
-                    }
                 }.runTaskLaterAsynchronously(pl, 200L);
 
 
